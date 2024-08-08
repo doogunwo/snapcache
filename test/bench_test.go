@@ -19,12 +19,11 @@ import (
   bloomfilter "github.com/holiman/bloomfilter/v2"
   "github.com/ethereum/go-ethereum/rlp"
   "github.com/ethereum/go-ethereum/ethdb"
+  "github.com/ethereum/go-ethereum/rpc"
 )
 
 
-const (
-  ipcpath = "/mnt/nvme0n1/ethereum/execution/Fullnode/geth.ipc"  
-)
+
 func cacheload(cachePath string) (*fastcache.Cache){
   
   //load cache 
@@ -44,9 +43,10 @@ func DiskAccess(hash common.Hash){
 
 func NewBlock(ipcpath string,number *big.Int) (map[common.Hash][]byte, error){
 
-  client, _ := ethclient.Dial(ipcpath)
- 
-  block, err := client.BlockByNumber(context.Background(), number)
+  client, _ := rpc.Dial(ipcpath)
+  ec := ethclient.NewClient(client)
+  
+  block, err := ec.BlockByNumber(context.Background(), number)
   if err != nil {
     return nil, err
   }
@@ -54,17 +54,18 @@ func NewBlock(ipcpath string,number *big.Int) (map[common.Hash][]byte, error){
   accountMap := make(map[common.Hash][]byte)
 
   for _, tx := range block.Transactions() {
-    to := tx.To()
-    if to == nil {
-      continue
+    txHash := tx.Hash()
+    tx, _, _:= ec.TransactionByHash(context.Background(), txHash)
+    var toAddress common.Address 
+    if tx.To() != nil {
+      toAddress = *tx.To()
     }
 
-    balance, err := client.BalanceAt(context.Background(), *to, block.Number())
+    balance, err := ec.BalanceAt(context.Background(), toAddress, nil)
     if err != nil {
-      return nil, fmt.Errorf("failed to get balance for account %s at block %d: %v", to.Hex(), number, err)
+      return nil, err
     }
-
-    accountMap[common.BytesToHash(to.Bytes())] = balance.Bytes()
+    accountMap[common.BytesToHash(toAddress.Bytes())] = balance.Bytes() 
   }
 
   return accountMap, nil
@@ -390,7 +391,7 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 	if blob, found := dl.cache.HasGet(nil, hash[:]); found {
 			return blob, nil
 	}
-	// Cache doesn't contain account, pull from disk and cache for later
+	// Cache do esn't contain account, pull from disk and cache for later
 	blob := rawdb.ReadAccountSnapshot(dl.diskdb, hash)
 	dl.cache.Set(hash[:], blob)
 
@@ -398,7 +399,7 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 }
 
 func TestSnapshot2(t *testing.T){
-  
+  ipcpath := "/mnt/nvme0n1/ethereum/execution/Fullnode/geth.ipc" 
   makeRoot := func(height uint64) common.Hash {
 		var buffer [8]byte
 		binary.BigEndian.PutUint64(buffer[:], height)
@@ -407,7 +408,7 @@ func TestSnapshot2(t *testing.T){
   
   base := &diskLayer{
 		diskdb: rawdb.NewMemoryDatabase(),
-		root:   makeRoot(1),
+		root:   makeRoot(12345),
 		cache:  fastcache.New(1024 * 500),
 	}
   
@@ -419,9 +420,6 @@ func TestSnapshot2(t *testing.T){
   //big.NewInt(int64(i)
   diff_start  := int64(20474737)
   diff_end    := int64(20474737-128)
-  
-  
- 
 
   last := common.HexToHash("0x01")
 

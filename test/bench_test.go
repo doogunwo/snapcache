@@ -5,21 +5,29 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
+	"math"
 	"math/big"
-	"testing"
-  "sync"
+	"math/rand"
+	"os"
+	"sync"
 	"sync/atomic"
-  "math/rand"
-  "math"
+	"testing"
+
+  "bufio"
+  
+
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/rawdb"
+  "github.com/ethereum/go-ethereum/crypto"
+	//"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
-  "github.com/ethereum/go-ethereum/core/types"
-  bloomfilter "github.com/holiman/bloomfilter/v2"
-  "github.com/ethereum/go-ethereum/rlp"
-  "github.com/ethereum/go-ethereum/ethdb"
-  "github.com/ethereum/go-ethereum/rpc"
+	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/ethdb/memorydb"
+	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ethereum/go-ethereum/rpc"
+	bloomfilter "github.com/holiman/bloomfilter/v2"
+	"github.com/holiman/uint256"
 )
 
 
@@ -43,7 +51,10 @@ func DiskAccess(hash common.Hash){
 
 func NewBlock(ipcpath string,number *big.Int) (map[common.Hash][]byte, error){
 
-  client, _ := rpc.Dial(ipcpath)
+  client, err := rpc.Dial(ipcpath)
+  if err != nil {
+    return nil, err
+  }
   ec := ethclient.NewClient(client)
   
   block, err := ec.BlockByNumber(context.Background(), number)
@@ -56,16 +67,29 @@ func NewBlock(ipcpath string,number *big.Int) (map[common.Hash][]byte, error){
   for _, tx := range block.Transactions() {
     txHash := tx.Hash()
     tx, _, _:= ec.TransactionByHash(context.Background(), txHash)
+    
     var toAddress common.Address 
     if tx.To() != nil {
       toAddress = *tx.To()
     }
 
-    balance, err := ec.BalanceAt(context.Background(), toAddress, nil)
+    balanceBigInt, err := ec.BalanceAt(context.Background(), toAddress, nil)
     if err != nil {
       return nil, err
     }
-    accountMap[common.BytesToHash(toAddress.Bytes())] = balance.Bytes() 
+
+    balance := new(uint256.Int) 
+    balance.SetFromBig(balanceBigInt) 
+    account := types.SlimAccount{
+      Balance: balance,
+    }
+  
+    blob, err := rlp.EncodeToBytes(account)
+    if err != nil {
+      return nil, err
+    }
+
+    accountMap[common.BytesToHash(toAddress.Bytes())] = blob   
   }
 
   return accountMap, nil
@@ -93,46 +117,24 @@ type diffLayer struct {
 
 
 var (
-	// aggregatorMemoryLimit is the maximum size of the bottom-most diff layer
-	// that aggregates the writes from above until it's flushed into the disk
-	// layer.
-	//
-	// Note, bumping this up might drastically increase the size of the bloom
-	// filters that's stored in every diff layer. Don't do that without fully
-	// understanding all the implications.
+
+  cacheMisses = uint64(0)
+  cachehits = uint64(0)
+  
 	aggregatorMemoryLimit = uint64(4 * 1024 * 1024)
 
-	// aggregatorItemLimit is an approximate number of items that will end up
-	// in the aggregator layer before it's flushed out to disk. A plain account
-	// weighs around 14B (+hash), a storage slot 32B (+hash), a deleted slot
-	// 0B (+hash). Slots are mostly set/unset in lockstep, so that average at
-	// 16B (+hash). All in all, the average entry seems to be 15+32=47B. Use a
-	// smaller number to be on the safe side.
+
 	aggregatorItemLimit = aggregatorMemoryLimit / 42
 
-	// bloomTargetError is the target false positive rate when the aggregator
-	// layer is at its fullest. The actual value will probably move around up
-	// and down from this number, it's mostly a ballpark figure.
-	//
-	// Note, dropping this down might drastically increase the size of the bloom
-	// filters that's stored in every diff layer. Don't do that without fully
-	// understanding all the implications.
+
 	bloomTargetError = 0.02
 
-	// bloomSize is the ideal bloom filter size given the maximum number of items
-	// it's expected to hold and the target false positive error rate.
+
 	bloomSize = math.Ceil(float64(aggregatorItemLimit) * math.Log(bloomTargetError) / math.Log(1/math.Pow(2, math.Log(2))))
 
-	// bloomFuncs is the ideal number of bits a single entry should set in the
-	// bloom filter to keep its size to a minimum (given it's size and maximum
-	// entry count).
+
 	bloomFuncs = math.Round((bloomSize / float64(aggregatorItemLimit)) * math.Log(2))
 
-	// the bloom offsets are runtime constants which determines which part of the
-	// account/storage hash the hasher functions looks at, to determine the
-	// bloom key for an account/slot. This is randomized at init(), so that the
-	// global population of nodes do not all display the exact same behaviour with
-	// regards to bloom content
 	bloomDestructHasherOffset = 0
 	bloomAccountHasherOffset  = 0
 	bloomStorageHasherOffset  = 0
@@ -169,7 +171,8 @@ func storageBloomHash(h0, h1 common.Hash) uint64 {
 		binary.BigEndian.Uint64(h1[bloomStorageHasherOffset:bloomStorageHasherOffset+8])
 }
 
-func (dl *diffLayer) Account(hash common.Hash) (*types.SlimAccount, error) {
+func (dl *diffLayer) Account(hash common.Hash) ([]byte, error) {
+
 	data, err := dl.AccountRLP(hash)
 	if err != nil {
 		return nil, err
@@ -177,18 +180,11 @@ func (dl *diffLayer) Account(hash common.Hash) (*types.SlimAccount, error) {
 	if len(data) == 0 { // can be both nil and []byte{}
 		return nil, nil
 	}
-	account := new(types.SlimAccount)
-	if err := rlp.DecodeBytes(data, account); err != nil {
-		panic(err)
-	}
-	return account, nil
+  return data, nil 
 }
 
-
 func (dl *diffLayer) AccountRLP(hash common.Hash) ([]byte, error) {
-
 	dl.lock.RLock()
-	
 
 	hit := dl.diffed.ContainsHash(accountBloomHash(hash))
 	if !hit {
@@ -226,8 +222,6 @@ func (dl *diffLayer) accountRLP(hash common.Hash, depth int) ([]byte, error) {
 	if diff, ok := dl.parent.(*diffLayer); ok {
 		return diff.accountRLP(hash, depth+1)
 	}
-	
-	
 	return dl.parent.AccountRLP(hash)
 }
 
@@ -311,6 +305,8 @@ type diskLayer struct {
 	root  common.Hash // Root hash of the base snapshot
 
 	lock sync.RWMutex
+
+
 }
 
 func (dl *diskLayer) Update(blockHash common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, storage map[common.Hash]map[common.Hash][]byte) *diffLayer {
@@ -322,7 +318,7 @@ type Snapshot interface {
 
 	// Account directly retrieves the account associated with a particular hash in
 	// the snapshot slim data format.
-	Account(hash common.Hash) (*types.SlimAccount, error)
+	Account(hash common.Hash) ([]byte, error)
 
 	// AccountRLP directly retrieves the account RLP associated with a particular
 	// hash in the snapshot slim data format.
@@ -368,7 +364,7 @@ func (t *Tree) Update(blockRoot common.Hash, parentRoot common.Hash, destructs m
 	return nil
 }
 
-func (dl *diskLayer) Account(hash common.Hash) (*types.SlimAccount, error) {
+func (dl *diskLayer) Account(hash common.Hash) ([]byte, error) {
 	data, err := dl.AccountRLP(hash)
 	if err != nil {
 		return nil, err
@@ -376,58 +372,169 @@ func (dl *diskLayer) Account(hash common.Hash) (*types.SlimAccount, error) {
 	if len(data) == 0 { // can be both nil and []byte{}
 		return nil, nil
 	}
-	account := new(types.SlimAccount)
-	if err := rlp.DecodeBytes(data, account); err != nil {
-		panic(err)
-	}
-	return account, nil
+	
+  return data, nil
 }
 
 func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()
 
-	// Try to retrieve the account from the memory cache
+	// 캐시 적중
 	if blob, found := dl.cache.HasGet(nil, hash[:]); found {
+      atomic.AddUint64(&cachehits, 1)     
 			return blob, nil
 	}
-	// Cache do esn't contain account, pull from disk and cache for later
-	blob := rawdb.ReadAccountSnapshot(dl.diskdb, hash)
-	dl.cache.Set(hash[:], blob)
 
-	return blob, nil
+  atomic.AddUint64(&cacheMisses, 1)
+  
+	// Cache do esn't contain account, pull from disk and cache for later
+	//blob := rawdb.ReadAccountSnapshot(dl.diskdb, hash)
+	//dl.cache.Set(hash[:], blob)
+  /*
+  address := common.BytesToAddress(hash[:])
+
+  ipcpath := "/mnt/nvme0n1/ethereum/execution/Fullnode/geth.ipc"
+  client, _ := rpc.Dial(ipcpath)
+  ec := ethclient.NewClient(client)
+  balance, _ := ec.BalanceAt(context.Background(), address, nil)
+	
+  blob, err := rlp.EncodeToBytes(balance)
+  if err != nil {
+		return nil, err
+	}
+	//dl.cache.Set(hash[:], blob)
+  */
+	return nil, nil
 }
 
-func TestSnapshot2(t *testing.T){
+
+func emptyLayer() *diskLayer {
+ 	return &diskLayer{
+		diskdb: memorydb.New(),
+		cache:  fastcache.New(500 * 1024),
+	}
+}
+
+func cacheLoadLayer() *diskLayer {
+  makeCachefile()
+  cachePath := "addrOver100.dat"
+  loadedCache, err := fastcache.LoadFromFile(cachePath)
+  if err != nil {
+    log.Fatalf("Failed to load cache : %v", err)
+  }
+
+  return &diskLayer{
+        diskdb: memorydb.New(),      // Use the provided ethdb.KeyValueStore
+        cache:  loadedCache, // Use the loaded cache
+    }
+}
+
+func copyDestructs(destructs map[common.Hash]struct{}) map[common.Hash]struct{} {
+	copy := make(map[common.Hash]struct{})
+	for hash := range destructs {
+		copy[hash] = struct{}{}
+	}
+	return copy
+}
+
+
+func copyStorage(storage map[common.Hash]map[common.Hash][]byte) map[common.Hash]map[common.Hash][]byte {
+	copy := make(map[common.Hash]map[common.Hash][]byte)
+	for accHash, slots := range storage {
+		copy[accHash] = make(map[common.Hash][]byte)
+		for slotHash, blob := range slots {
+			copy[accHash][slotHash] = blob
+		}
+	}
+	return copy
+}
+
+func TestSnapshot_basic(t *testing.T){
   ipcpath := "/mnt/nvme0n1/ethereum/execution/Fullnode/geth.ipc" 
-  makeRoot := func(height uint64) common.Hash {
-		var buffer [8]byte
-		binary.BigEndian.PutUint64(buffer[:], height)
-		return common.BytesToHash(buffer[:])
-	}
   
-  base := &diskLayer{
-		diskdb: rawdb.NewMemoryDatabase(),
-		root:   makeRoot(12345),
-		cache:  fastcache.New(1024 * 500),
-	}
+  var (
+		destructs = make(map[common.Hash]struct{})
+		accounts  = make(map[common.Hash][]byte)
+		storage   = make(map[common.Hash]map[common.Hash][]byte) 
+	)
   
-  snaps := &Tree{
-    layers: map[common.Hash] snapshot {
-      base.root: base,
-    },
+   
+   // diff range
+  diff_init   := int64(20474737)
+  diff_start  := int64(20474736)
+  diff_end    := int64(20474737-127)
+  
+  //new parent
+  accounts, err := NewBlock(ipcpath,big.NewInt(diff_init))
+  if err != nil {
+    t.Logf("newblock err : %v", err)
   }
-  //big.NewInt(int64(i)
-  diff_start  := int64(20474737)
-  diff_end    := int64(20474737-128)
+  parent := newDiffLayer(cacheLoadLayer(), common.Hash{}, copyDestructs(destructs), accounts, copyStorage(storage))
 
-  last := common.HexToHash("0x01")
+  // 2 ~ 128 range diff layer
+  for i:=diff_end; i>=diff_start; i-- {
+    accounts, err := NewBlock(ipcpath, big.NewInt(int64(i)))
+    if err != nil {
+      t.Logf("newblock err : %v", err)
+    }
+    child := parent.Update(common.Hash{}, copyDestructs(destructs), accounts, copyStorage(storage))
+    parent = child
+  }
 
-  for i:= diff_end; i<=diff_start; i++ {
-    head := common.BytesToHash([]byte{byte(i+2)})
-    accounts, _ := NewBlock(ipcpath, big.NewInt(int64(i)))
-    snaps.Update(head, last, nil, accounts, nil)
-    last = head
+  file, err := os.Open("../addr_fullnode2.txt")
+  if err != nil {
+    t.Logf("txt error : %v", err)
+  }
+  cnt := 1
+  scanner := bufio.NewScanner(file)
+  for scanner.Scan() {
+
+    line := scanner.Text()
+    accountHash := crypto.Keccak256Hash([]byte(line))
+
+  
+    var acc []byte
+    var err error
+    acc , err = parent.Account(accountHash)
+    if err != nil  || acc == nil {
+      t.Log(cnt)
+    } else {
+    t.Log(cnt)  
+    }
+    cnt = cnt +1
+  }
+
+  t.Log("test complete")
+  t.Log("Total execution:",cnt," cachehits : " ,cachehits," cacheMisses", cacheMisses)
+ 
+}
+
+func makeCachefile(){
+
+  file, _ := os.Open("addrOver100.txt")
+ 
+
+  ipcpath := "/mnt/nvme0n1/ethereum/execution/Fullnode/geth.ipc"
+  client, _ := rpc.Dial(ipcpath)
+  
+  cache := fastcache.New(550 * 1024)
+
+
+  ec := ethclient.NewClient(client)
+  
+  
+  scanner := bufio.NewScanner(file)
+  for scanner.Scan() {
+
+    line := scanner.Text()
+    address := common.HexToAddress(line)
+    bal, _ := ec.BalanceAt(context.Background(), address, nil)
+    balBytes := bal.Bytes()
+    cache.Set(address.Bytes(), balBytes) 
   }
   
+  filepath := "addrOver100.dat"
+  cache.SaveToFile(filepath)
+ 
 }

@@ -1,6 +1,7 @@
 package test
 
 import (
+	"bufio"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -9,16 +10,16 @@ import (
 	"math/big"
 	"math/rand"
 	"os"
+	"runtime"
+	"runtime/pprof"
 	"sync"
 	"sync/atomic"
 	"testing"
 
-  "bufio"
-  
-
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ethereum/go-ethereum/common"
-  "github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/crypto"
+
 	//"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -306,7 +307,6 @@ type diskLayer struct {
 
 	lock sync.RWMutex
 
-
 }
 
 func (dl *diskLayer) Update(blockHash common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, storage map[common.Hash]map[common.Hash][]byte) *diffLayer {
@@ -381,13 +381,18 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 	defer dl.lock.RUnlock()
 
 	// 캐시 적중
+
+   // if blob, found := dl.cache.HasGet(nil, address.Bytes())
 	if blob, found := dl.cache.HasGet(nil, hash[:]); found {
+
       atomic.AddUint64(&cachehits, 1)     
 			return blob, nil
 	}
 
   atomic.AddUint64(&cacheMisses, 1)
-  
+  balance := big.NewInt(1234) 
+  blob, _ := rlp.EncodeToBytes(balance)
+  dl.cache.Set(hash[:], blob)
 	// Cache do esn't contain account, pull from disk and cache for later
 	//blob := rawdb.ReadAccountSnapshot(dl.diskdb, hash)
 	//dl.cache.Set(hash[:], blob)
@@ -403,7 +408,7 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
   if err != nil {
 		return nil, err
 	}
-	//dl.cache.Set(hash[:], blob)
+	dl.cache.Set(hash[:], blob)
   */
 	return nil, nil
 }
@@ -412,13 +417,13 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 func emptyLayer() *diskLayer {
  	return &diskLayer{
 		diskdb: memorydb.New(),
-		cache:  fastcache.New(500 * 1024),
+		cache:  fastcache.New(1 * 1024 * 1024),
 	}
 }
 
 func cacheLoadLayer() *diskLayer {
-  makeCachefile()
-  cachePath := "addrOver100.dat"
+  
+  cachePath := "addrOver100"
   loadedCache, err := fastcache.LoadFromFile(cachePath)
   if err != nil {
     log.Fatalf("Failed to load cache : %v", err)
@@ -459,19 +464,33 @@ func TestSnapshot_basic(t *testing.T){
 		storage   = make(map[common.Hash]map[common.Hash][]byte) 
 	)
   
-   
+  logMemoryUsage(t) 
+
+  cpuProfile, err := os.Create("cpu.profile")
+  if err != nil {
+    t.Fatalf("could not create cpu profile : %v", err)
+  }
+  defer cpuProfile.Close()
+  
+  if err := pprof.StartCPUProfile(cpuProfile); err != nil {
+    t.Fatalf("could not start cpu profile : %v", err)
+  }
+  defer pprof.StopCPUProfile()
+
    // diff range
   diff_init   := int64(20474737)
   diff_start  := int64(20474736)
   diff_end    := int64(20474737-127)
   
-  //new parent
-  accounts, err := NewBlock(ipcpath,big.NewInt(diff_init))
+  //new parent:
+  accounts, err = NewBlock(ipcpath,big.NewInt(diff_init))
+  parent := newDiffLayer(emptyLayer(), common.Hash{}, copyDestructs(destructs), accounts, copyStorage(storage))
+  f, err := os.Create("heap.prof")
   if err != nil {
-    t.Logf("newblock err : %v", err)
+    log.Fatalf("could not create heap profile :%v", err)
   }
-  parent := newDiffLayer(cacheLoadLayer(), common.Hash{}, copyDestructs(destructs), accounts, copyStorage(storage))
-
+  pprof.WriteHeapProfile(f)
+  f.Chdir()
   // 2 ~ 128 range diff layer
   for i:=diff_end; i>=diff_start; i-- {
     accounts, err := NewBlock(ipcpath, big.NewInt(int64(i)))
@@ -491,22 +510,22 @@ func TestSnapshot_basic(t *testing.T){
   for scanner.Scan() {
 
     line := scanner.Text()
-    accountHash := crypto.Keccak256Hash([]byte(line))
+    address := common.HexToAddress(line)
+    accountHash := crypto.Keccak256Hash(address.Bytes())
 
-  
     var acc []byte
     var err error
+
     acc , err = parent.Account(accountHash)
     if err != nil  || acc == nil {
-      t.Log(cnt)
     } else {
-    t.Log(cnt)  
     }
     cnt = cnt +1
   }
 
   t.Log("test complete")
   t.Log("Total execution:",cnt," cachehits : " ,cachehits," cacheMisses", cacheMisses)
+  logMemoryUsage(t)
  
 }
 
@@ -531,10 +550,21 @@ func makeCachefile(){
     address := common.HexToAddress(line)
     bal, _ := ec.BalanceAt(context.Background(), address, nil)
     balBytes := bal.Bytes()
-    cache.Set(address.Bytes(), balBytes) 
+    accountHash := crypto.Keccak256Hash(address.Bytes()) // accountHash 생성
+    cache.Set(accountHash.Bytes(), balBytes) 
   }
   
-  filepath := "addrOver100.dat"
+  filepath := "addrOver100"
   cache.SaveToFile(filepath)
  
+}
+
+func logMemoryUsage(t *testing.T) {
+    var m runtime.MemStats
+    runtime.ReadMemStats(&m)
+    t.Logf("Allocated memory: %v MB", m.Alloc/1024/1024)
+    t.Logf("Total Allocated memory: %v MB", m.TotalAlloc/1024/1024)
+    t.Logf("Heap Objects: %v", m.HeapObjects)
+    t.Logf("Garbage Collected: %v", m.NumGC)
+  
 }

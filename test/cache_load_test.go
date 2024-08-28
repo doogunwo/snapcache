@@ -1,16 +1,22 @@
 package test
 
 import (
+	"bufio"
 	"log"
-  "testing"
+	"os"
+	"testing"
+  "math/big"
+
 	"github.com/VictoriaMetrics/fastcache"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
 func TestLoad (t *testing.T) {
 	// Create cache
 
 		// Save cache to file
-	filePath := "cache.dat"
+	filePath := "addrOver100"
 
 
 	// Load cache from file
@@ -19,13 +25,23 @@ func TestLoad (t *testing.T) {
 		log.Fatalf("Failed to load cache: %s", err)
 	}
   
-	// Verify data is loaded correctly
-	for i := 0; i < 300; i++ {
-		key := "AAA"
-		v := loadedCache.Get(nil, []byte(key))
-		if v != nil {
-			t.Logf("Key: %s, Value: %s\n", key, v)
-		}
-	}
+  txtfild := "addrOver100.txt"
+  file, _ := os.Open(txtfild)
+  scanner := bufio.NewScanner(file)
+  cnt := 1
+  for scanner.Scan() {
+    line := scanner.Text()
+    address := common.HexToAddress(line)
+    accountHash := crypto.Keccak256Hash(address.Bytes())
+    data, found := loadedCache.HasGet(nil, accountHash.Bytes())
+    if found {
+      balance := new(big.Int).SetBytes(data)
+      t.Logf("%d: %s", cnt, balance.String())
+    } else {
+      t.Log(cnt," dont found")
+    }
+
+    cnt = cnt +1
+  }
 }
 

@@ -2,14 +2,11 @@ package main
 
 import (
 	"bufio"
-	crand "crypto/rand"
 
 	"math/big"
 	"math/rand"
 	"os"
-	"sync/atomic"
 	"testing"
-  "runtime"
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ethereum/go-ethereum/common"
@@ -48,25 +45,16 @@ func generateRandomAccount() []byte {
 
 func TestFastCache(t *testing.T) {
 
-  cache := fastcache.New(13 * 1024  * 1024)
+  cache := fastcache.New(512 * 1024  * 1024)
   
-  var (
-    cacheMisses = uint64(0)
-    cacheHit    = uint64(0)
-  )
+ 
 
   file, err := os.Open("../addr_fullnode2.txt") // key load
   if err != nil {
     t.Logf("txt error : %v", err)
   }
 
-  var memStats runtime.memStats
-  runtime.ReadMemStats(&memStats)
-  startGC := memStats.NumGC
 
-  b.ResetTimer()
-
-  cnt := 1
   scanner := bufio.NewScanner(file)
   for scanner.Scan(){
     line := scanner.Text()
@@ -75,16 +63,15 @@ func TestFastCache(t *testing.T) {
     
     _, found := cache.HasGet(nil, acc[:])
     if found {
-      atomic.AddUint64(&cacheHit, 1)
     } else {
-      atomic.AddUint64(&cacheMisses, 1)
       blob := generateRandomAccount()
       cache.Set(acc[:], blob)
     }
-	cnt = cnt + 1
   }
 
-  t.Log("complete")
-  t.Log("Total execution:",cnt," cachehits : " ,cacheHit," cacheMisses", cacheMisses)
+  var stats fastcache.Stats
+  cache.UpdateStats(&stats)
+  t.Logf("Fastcache Stats: %+v\n", stats)
+  
 }
 

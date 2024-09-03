@@ -1,4 +1,4 @@
-package cache
+package s3fifo
 
 import (
 	"container/list"

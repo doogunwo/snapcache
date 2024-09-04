@@ -101,3 +101,25 @@ func TestSnapCache_Key_Hash(t *testing.T){
     }
 }
 
+func TestSnapCache_flage(t *testing.T){
+	cache := New[string, int](512)
+		
+	for i := 0; i < 512; i++ {
+		cache.Set(strconv.Itoa(i), i)
+	}
+	_, ok := cache.Get(strconv.Itoa(0))
+	if !ok {
+		t.Fatalf("Key '0' should be present in cache")
+	}
+
+	cache.Set(strconv.Itoa(550), 550)
+
+	lastElement := cache.main.Back() // main 큐의 마지막 요소를 가져옵니다
+	if lastElement == nil {
+		t.Fatalf("Main queue is empty after Evict")
+	}
+
+	lastEntry := lastElement.Value.(*entry[string, int])
+	t.Log(lastEntry.key)
+
+}

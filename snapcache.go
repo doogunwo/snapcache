@@ -8,11 +8,11 @@ import (
 type SnapCache[K comparable, V any] struct {
 	mu sync.Mutex
 	main *list.List
-	sub *list.List
 	pointer config
 	maxSize int
 	currentSize int
 	items        map[K]*entry[K, V]
+	max int
 }
 
 type config struct {
@@ -25,17 +25,17 @@ type entry[K comparable, V any] struct {
 	key K
 	value V
 	element *list.Element
+	flag    int
 }
 
 func New[K comparable, V any](maxSize int) *SnapCache[K,V] {
 	//
 	mid := uint64(maxSize/2)
-	snap := uint64(64)
+	snap := uint64(512)
 	cushioning := uint64(0)
 	
 	return &SnapCache[K, V]{
 		main:        list.New(),
-		sub:         list.New(),
 		pointer:     config{mid: mid, snap: snap, cushioning: cushioning},
 		maxSize:     maxSize,
 		currentSize: 0,
@@ -80,11 +80,20 @@ func (sc *SnapCache[K,V]) Evict() int {
 		}
 
 		e := front.Value.(*entry[K, V])
-		sc.main.Remove(front)
-		delete(sc.items, e.key)
-		sc.currentSize--
-		evictCounter++
-		evictSize--
+
+		if e.flag > sc.max {
+			sc.main.Remove(front)
+			e.element = sc.main.PushBack(e.key)
+			
+		} else {
+			sc.main.Remove(front)
+			delete(sc.items, e.key)
+			sc.currentSize--
+			evictCounter++
+			evictSize--
+		}
+
+		
 	}
 
 	sc.pointer.mid = uint64(sc.maxSize / 2)
@@ -93,22 +102,6 @@ func (sc *SnapCache[K,V]) Evict() int {
 	return evictCounter
 } 
 
-func (sc *SnapCache[K,V]) Move(evictSize int) {
-
-	for i := 0; i < evictSize && sc.sub.Len() > 0; i++ {
-        
-        front := sc.sub.Front()
-
-		e, exists := front.Value.(*entry[K, V])
-        if !exists {
-            continue 
-        }
-    
-        sc.sub.Remove(front)
-        e.element = sc.main.PushBack(e.key)
-        sc.items[e.key] = e
-    }
-}
 
 func (sc *SnapCache[K, V]) Get(key K) (V, bool) {
     sc.mu.Lock()
@@ -117,7 +110,11 @@ func (sc *SnapCache[K, V]) Get(key K) (V, bool) {
     // 메인 큐에서 항목을 조회합니다.
     e, ok := sc.items[key]
     if ok && e.element != nil {
-		sc.pointer.cushioning++
+		e.flag++
+		if e.flag > sc.max {
+			sc.max = e.flag
+		}
+		sc.pointer.cushioning = sc.pointer.cushioning+2
         return e.value, true
     }
 

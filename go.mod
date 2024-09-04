@@ -11,7 +11,6 @@ require (
 	github.com/maypok86/otter v1.2.2
 	github.com/scalalang2/golang-fifo v1.0.2
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
-	go.uber.org/goleak v1.3.0
 )
 
 require (

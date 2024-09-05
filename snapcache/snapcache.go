@@ -2,8 +2,7 @@ package snapcache
 
 import (
 	"container/list"
-    "sync/atomic"
-	"unsafe"
+	"sync"
 )
 
 type SnapCache[K comparable, V any] struct {
@@ -54,10 +53,6 @@ func (sc *SnapCache[K, V]) Set(key K, value V) {
         return
     }
 
-	if sc.currentSize >= sc.maxSize {
-		sc.Evict()
-	}
-
 	e = &entry[K, V]{
 		key:     key,
 		value:   value,
@@ -67,13 +62,11 @@ func (sc *SnapCache[K, V]) Set(key K, value V) {
 	sc.items[key] = e
 	sc.currentSize++
 
-	if sc.pointer.snap == sc.pointer.mid {
-		sc.Evict()
-	}
 }
 
 func (sc *SnapCache[K,V]) Evict() int {
-	
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
 	evictCounter	:= 0
 	evictSize 		:= int(sc.pointer.snap - sc.pointer.cushioning)
 

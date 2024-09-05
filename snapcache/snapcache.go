@@ -2,8 +2,8 @@ package snapcache
 
 import (
 	"container/list"
-    "sync"
-	
+    "sync/atomic"
+	"unsafe"
 )
 
 type SnapCache[K comparable, V any] struct {

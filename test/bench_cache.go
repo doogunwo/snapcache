@@ -8,10 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/doogunwo/snapcache/snapcache"
+	"main/snapcache"
 )
 
-func Benchmark_SnapCache_Workload(b *testing.B) {
+
+
+func Benchmark_SnapCache_Workload2(b *testing.B) {
 	// 캐시 초기화
 	cache := snapcache.New[string, int](325300)
 	// CSV 파일 미리 로드
@@ -44,7 +46,7 @@ func Benchmark_SnapCache_Workload(b *testing.B) {
 	var wg sync.WaitGroup
 
 	// 쓰레드 수 정의 (여기서는 10개의 고루틴)
-	numThreads := 10
+	numThreads := 64
 
 	// 벤치마크 반복을 위한 작업
 	b.ResetTimer() // 타이머 리셋 (벤치마크 성능 측정에 불필요한 시간을 배제)

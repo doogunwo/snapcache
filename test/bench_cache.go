@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/doogunwo/snapcache"
+	"github.com/doogunwo/snapcache/snapcache"
 )
 
 func Benchmark_SnapCache_Workload(b *testing.B) {

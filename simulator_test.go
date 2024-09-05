@@ -1,4 +1,4 @@
-package main
+package snapcache
 
 import (
 	"encoding/csv"

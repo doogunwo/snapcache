@@ -1,8 +1,9 @@
-package main
+package snapcache
 
 import (
 	"container/list"
     "sync"
+	
 )
 
 type SnapCache[K comparable, V any] struct {

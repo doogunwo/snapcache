@@ -7,11 +7,13 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/doogunwo/snapcache"
 )
 
 func Benchmark_SnapCache_Workload(b *testing.B) {
 	// 캐시 초기화
-	cache := New[string, int](325300)
+	cache := snapcache.New[string, int](325300)
 	// CSV 파일 미리 로드
 	file, err := os.Open("dataset100.csv")
 	if err != nil {

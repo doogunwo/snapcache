@@ -77,7 +77,7 @@ func datamaker(filename string){
 	writer.Write([]string{"key", "value"})
 
 	// 총 데이터 수
-	totalData := 1000000
+	totalData := 10111111
 	oneHitWonderRatio := 0.50
 	oneHitWonderCount := int(float64(totalData) * oneHitWonderRatio)
 	// 랜덤 시드 설정
@@ -86,7 +86,7 @@ func datamaker(filename string){
 	// 데이터를 저장할 리스트
 	var data [][]string
 
-	// 1. 원히트원더 데이터 생성 (80%)
+	// 1. 원히트원더 데이터 생성
 	for i := 1; i <= oneHitWonderCount; i++ {
 		key := strconv.Itoa(i)
 		value := strconv.Itoa(i)
@@ -114,6 +114,10 @@ func datamaker(filename string){
 		writer.Write(record)
 	}
 
+}
+
+func Test_datamaker(t *testing.T){
+  datamaker("dataset100.csv")
 }
 
 func Test_SnapCache_Workload(t *testing.T){
@@ -232,6 +236,39 @@ func Test_LRU_Workload(t *testing.T){
 	// 타이머 시작
 	start := time.Now()
 
+  for i := 0; i < 325300; i++ {
+		record, err := reader.Read()
+		if err != nil {
+			break // 파일의 끝에 도달하면 루프 종료
+		}
+
+		// Fetch key and value from the CSV row
+		keyStr := record[0]
+		valueStr := record[1]
+
+		key, err := strconv.ParseUint(keyStr, 10, 64)
+		if err != nil {
+			t.Fatalf("Error converting key to uint64: %v", err)
+		}
+
+		value := valueStr
+		handle := cache.Get(0, key, nil) // Assuming 0 is the namespace, adjust if needed
+		totalRequests++
+
+		if handle == nil {
+			// Cache miss, add a new node to cache
+			cacheMisses++
+			cache.Get(0, key, func() (int, lru.Value) {
+				return len(value), value // size of value and the value itself
+			})
+		} else {
+			// Cache hit
+			cacheHits++
+			handle.Release() // Always release the handle after use
+		}
+	}
+
+	// 두 번째 for문: 그 이후 데이터에 대해 Get을 수행
 	for {
 		record, err := reader.Read()
 		if err != nil {
@@ -247,7 +284,7 @@ func Test_LRU_Workload(t *testing.T){
 			t.Fatalf("Error converting key to uint64: %v", err)
 		}
 
-		value := valueStr 
+		value := valueStr
 		handle := cache.Get(0, key, nil) // Assuming 0 is the namespace, adjust if needed
 		totalRequests++
 
@@ -262,8 +299,9 @@ func Test_LRU_Workload(t *testing.T){
 			cacheHits++
 			handle.Release() // Always release the handle after use
 		}
-
 	}
+
+
 	elapsed := time.Since(start)
 	qps := float64(totalRequests) / elapsed.Seconds()
 

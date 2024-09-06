@@ -8,17 +8,13 @@ import (
 type SnapCache[K comparable, V any] struct {
 	mu sync.Mutex
 	main *list.List
+	sub	 *list.List
 	pointer config
 	maxSize int
 	currentSize int
 	items        map[K]*entry[K, V]
 	max int
-}
-
-type config struct {
-	cushioning uint64
 	snap uint64
-	mid uint64
 }
 
 type entry[K comparable, V any] struct {
@@ -30,15 +26,14 @@ type entry[K comparable, V any] struct {
 
 func New[K comparable, V any](maxSize int) *SnapCache[K,V] {
 	//
-	mid := uint64(516)
-	snap := uint64(516)
-	cushioning := uint64(0)
+	snap := uint64(maxSize/10)
 	
 	return &SnapCache[K, V]{
 		main:        list.New(),
-		pointer:     config{mid: mid, snap: snap, cushioning: cushioning},
+		sub:        list.New(),
 		maxSize:     maxSize,
 		currentSize: 0,
+		snap:		snap,
 		items:       make(map[K]*entry[K, V]),
 	}
 }
@@ -68,7 +63,7 @@ func (sc *SnapCache[K,V]) Evict() int {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	evictCounter	:= 0
-	evictSize 		:= int(sc.pointer.snap - sc.pointer.cushioning)
+	evictSize 		:= int(sc.pointer.snap)
 
 	for sc.currentSize > 0 && evictSize > 0 {
 		front := sc.main.Front()
@@ -90,8 +85,6 @@ func (sc *SnapCache[K,V]) Evict() int {
 			evictSize--
 		}
 	}
-	sc.pointer.mid = uint64(sc.maxSize / 2)
-	sc.pointer.cushioning = 0
 
 	return evictCounter
 } 
@@ -107,11 +100,9 @@ func (sc *SnapCache[K, V]) Get(key K) (V, bool) {
 		if e.flag > sc.max {
 			sc.max = e.flag
 		}
-		sc.pointer.cushioning = sc.pointer.cushioning+2
         return e.value, true
     }
 
-	sc.pointer.mid>>= 1
 	var value V
     // 키가 존재하지 않는 경우 기본 값과 false를 반환합니다.
     return value, false
@@ -127,5 +118,4 @@ func (sc *SnapCache[K, V]) Purge() {
 	sc.items = make(map[K]*entry[K, V]) // 맵 초기화
 	sc.currentSize = 0         // 현재 크기 초기화
 	sc.max = 0                 // 최대 플래그 초기화
-	sc.pointer.cushioning = 0  // 쿠셔닝 초기화
 }

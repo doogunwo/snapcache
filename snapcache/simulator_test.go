@@ -58,7 +58,7 @@ func runBenchmark(b *testing.B, cache *SnapCache[string, int], workload string) 
 			cacheMisses++
 			cache.Set(key, value)
 
-			if cache.currentSize >= cache.maxSize {
+			if cache.main.Len() >= cache.maxSize {
 				cache.Evict() // 캐시가 가득 찼을 때 eviction 실행
 			}
 		} else {

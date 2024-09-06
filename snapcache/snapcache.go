@@ -9,9 +9,7 @@ type SnapCache[K comparable, V any] struct {
 	mu sync.Mutex
 	main *list.List
 	sub	 *list.List
-	pointer config
 	maxSize int
-	currentSize int
 	items        map[K]*entry[K, V]
 	max int
 	snap uint64
@@ -21,7 +19,6 @@ type entry[K comparable, V any] struct {
 	key K
 	value V
 	element *list.Element
-	flag    int
 }
 
 func New[K comparable, V any](maxSize int) *SnapCache[K,V] {
@@ -32,7 +29,6 @@ func New[K comparable, V any](maxSize int) *SnapCache[K,V] {
 		main:        list.New(),
 		sub:        list.New(),
 		maxSize:     maxSize,
-		currentSize: 0,
 		snap:		snap,
 		items:       make(map[K]*entry[K, V]),
 	}
@@ -51,11 +47,10 @@ func (sc *SnapCache[K, V]) Set(key K, value V) {
 	e = &entry[K, V]{
 		key:     key,
 		value:   value,
-		element: sc.main.PushFront(&entry[K, V]{key: key, value: value}),
+		element: sc.main.PushBack(&entry[K, V]{key: key, value: value}), 
 	}
 
 	sc.items[key] = e
-	sc.currentSize++
 
 }
 
@@ -63,27 +58,20 @@ func (sc *SnapCache[K,V]) Evict() int {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	evictCounter	:= 0
-	evictSize 		:= int(sc.pointer.snap)
+	evictSize 		:= int(sc.snap)
 
-	for sc.currentSize > 0 && evictSize > 0 {
+	for sc.main.Len() > 0 && evictSize > 0 {
 		front := sc.main.Front()
 		if front == nil {
 			break
 		}
 
 		e := front.Value.(*entry[K, V])
+		sc.main.Remove(front)
+        delete(sc.items, e.key)
 
-		if e.flag > sc.max {
-			sc.main.Remove(front)
-			e.element = sc.main.PushBack(e.key)
-			
-		} else {
-			sc.main.Remove(front)
-			delete(sc.items, e.key)
-			sc.currentSize--
-			evictCounter++
-			evictSize--
-		}
+        evictCounter++
+        evictSize--
 	}
 
 	return evictCounter
@@ -96,10 +84,6 @@ func (sc *SnapCache[K, V]) Get(key K) (V, bool) {
     // 메인 큐에서 항목을 조회합니다.
     e, ok := sc.items[key]
     if ok && e.element != nil {
-		e.flag++
-		if e.flag > sc.max {
-			sc.max = e.flag
-		}
         return e.value, true
     }
 
@@ -116,6 +100,5 @@ func (sc *SnapCache[K, V]) Purge() {
 	// 캐시 항목 모두 제거
 	sc.main.Init()            // 메인 리스트 초기화
 	sc.items = make(map[K]*entry[K, V]) // 맵 초기화
-	sc.currentSize = 0         // 현재 크기 초기화
 	sc.max = 0                 // 최대 플래그 초기화
 }

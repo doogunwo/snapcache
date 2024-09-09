@@ -1,4 +1,4 @@
-module main
+module github.com/doogunwo/snapcache
 
 go 1.23.0
 

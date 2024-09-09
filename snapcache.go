@@ -43,16 +43,23 @@ func (sc *SnapCache[K, V]) Full() bool {
 
 func (sc *SnapCache[K, V]) Set(key K, value V) {
 	sc.mu.Lock()
-	defer sc.mu.Unlock()
 	
 	e, ok := sc.items[key]
     if ok {
         e.value = value
+		sc.mu.Unlock()
         return
     }
+
 	if sc.Full() {
+		sc.mu.Unlock()
 		sc.Evict()
 	}
+
+	// 항목을 추가하기 위해 다시 잠금 설정
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	
 	e = &entry[K, V]{
 		key:     key,
 		value:   value,
@@ -60,7 +67,6 @@ func (sc *SnapCache[K, V]) Set(key K, value V) {
 	}
 
 	sc.items[key] = e
-
 }
 
 func (sc *SnapCache[K,V]) Evict() int {

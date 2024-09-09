@@ -56,7 +56,7 @@ func (sc *SnapCache[K, V]) Set(key K, value V) {
 	e = &entry[K, V]{
 		key:     key,
 		value:   value,
-		element: sc.main.PushBack(&entry[K, V]{key: key, value: value}), 
+		element: sc.main.PushBack(e),
 	}
 
 	sc.items[key] = e

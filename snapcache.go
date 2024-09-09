@@ -1,4 +1,4 @@
-package github.com/doogunwo/snapcache
+package snapcache
 
 import (
 	"container/list"

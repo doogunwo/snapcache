@@ -23,15 +23,22 @@ type entry[K comparable, V any] struct {
 
 func New[K comparable, V any](maxSize int) *SnapCache[K,V] {
 	//
-	snap := uint64(maxSize/10)
+	snap := uint64(1)
 	
 	return &SnapCache[K, V]{
-		main:        list.New(),
-		sub:        list.New(),
-		maxSize:     maxSize,
-		snap:		snap,
-		items:       make(map[K]*entry[K, V]),
+		main:        	list.New(),
+		sub:        	list.New(),
+		maxSize:     	maxSize,
+		snap:			snap,
+		items:       	make(map[K]*entry[K, V]),
 	}
+}
+
+func (sc *SnapCache[K, V]) Full() bool {
+	if sc.main.Len() >= sc.maxSize {
+		return true
+	}
+	return false
 }
 
 func (sc *SnapCache[K, V]) Set(key K, value V) {

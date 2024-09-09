@@ -30,16 +30,16 @@ def benchmark_s3fifo(cache, workload_file):
     qps = total_requests / elapsed
 
     # Print benchmark results
-    print(total_requests)
-    print(cache_hits)
-    print(cache_misses)
-    print(cache_hits / total_requests * 100)
-    print(qps)
+    print(f"Total Requests: {total_requests}")
+    print(f"Cache Hits: {cache_hits}")
+    print(f"Cache Misses: {cache_misses}")
+    print(f"Hit Rate: {cache_hits / total_requests * 100:.2f}%")
+    print(f"Queries per Second (QPS): {qps:.2f}")
 
 if __name__ == "__main__":
 
     # Create S3FIFO cache
-    cache1 = S3FIFO(cache_size=512)
+    cache1 = S3FIFO(cache_size=32000)
 
     # Run benchmarks
-    benchmark_s3fifo(cache1, "../data/block.csv")
+    benchmark_s3fifo(cache1, "../test/dataset100.csv")

@@ -1,14 +1,15 @@
-package snapcache
+package test
 
 import (
 	"testing"
 	"strconv"
 	"hash/fnv"
+	"main/snapcache"
 )
 
 func TestSnapCache_New(t *testing.T){
 
-	cache := New[string, int](512)	
+	cache := snapcache.New[string, int](512)	
 	cache.Set("key1",1)
 	value, ok := cache.Get("key1")
 	if !ok {
@@ -19,7 +20,7 @@ func TestSnapCache_New(t *testing.T){
 }
 
 func TestSnapCache_Hit(t *testing.T){
-	cache := New[string, int](512)
+	cache := snapcache.New[string, int](512)
 	// 캐시를 최대 용량까지 채웁니다
     for i := 0; i < cache.maxSize; i++ {
         cache.Set(strconv.Itoa(i), i)
@@ -32,7 +33,7 @@ func TestSnapCache_Hit(t *testing.T){
 }
 
 func TestSnapCache_Miss(t *testing.T){
-	cache := New[string, int](512)
+	cache := snapcache.New[string, int](512)
 	// 캐시를 최대 용량까지 채웁니다
     for i := 0; i < cache.maxSize; i++ {
         cache.Set(strconv.Itoa(i), i)
@@ -47,7 +48,7 @@ func TestSnapCache_Miss(t *testing.T){
 }
 
 func TestSnapCache_Evict_Miss(t *testing.T){
-	cache := New[string, int](512)
+	cache := snapcache.New[string, int](512)
 	// 캐시를 최대 용량까지 채웁니다
     for i := 0; i < cache.maxSize; i++ {
         cache.Set(strconv.Itoa(i), i)
@@ -78,7 +79,7 @@ func TestSnapCache_Evict_Miss(t *testing.T){
 }
 
 func TestSnapCache_Evict_Full(t *testing.T){
-	cache := New[string, int](512)
+	cache := snapcache.New[string, int](512)
 	
 	for i := 0; i < 700; i++ {
 		cache.Set(strconv.Itoa(i), i)
@@ -93,7 +94,7 @@ func hashKey(key string) uint32 {
 }
 
 func TestSnapCache_Key_Hash(t *testing.T){
-	cache := New[string, int](512)
+	cache := snapcache.New[string, int](512)
 
 	for i := 0; i < cache.maxSize; i++ {
 		hashedKey := hashKey(strconv.Itoa(i))
@@ -102,7 +103,7 @@ func TestSnapCache_Key_Hash(t *testing.T){
 }
 
 func TestSnapCache_flage(t *testing.T){
-	cache := New[string, int](512)
+	cache := snapcache.New[string, int](512)
 		
 	for i := 0; i < 512; i++ {
 		cache.Set(strconv.Itoa(i), i)

@@ -35,35 +35,24 @@ func New[K comparable, V any](maxSize int) *SnapCache[K,V] {
 }
 
 func (sc *SnapCache[K, V]) Full() bool {
-	if sc.main.Len() >= sc.maxSize {
-		return true
-	}
-	return false
+	return sc.main.Len() >= sc.maxSize
 }
 
 func (sc *SnapCache[K, V]) Set(key K, value V) {
 	sc.mu.Lock()
+	defer sc.mu.Unlock()
 	
 	e, ok := sc.items[key]
     if ok {
         e.value = value
-		sc.mu.Unlock()
         return
     }
 
-	if sc.Full() {
-		sc.mu.Unlock()
-		sc.Evict()
-	}
-
-	// 항목을 추가하기 위해 다시 잠금 설정
-	sc.mu.Lock()
-	defer sc.mu.Unlock()
 	
 	e = &entry[K, V]{
 		key:     key,
 		value:   value,
-		element: sc.main.PushBack(e),
+		element: sc.main.PushBack(&entry[K, V]{key: key, value: value}),
 	}
 
 	sc.items[key] = e
@@ -72,8 +61,8 @@ func (sc *SnapCache[K, V]) Set(key K, value V) {
 func (sc *SnapCache[K,V]) Evict() int {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
-	evictCounter	:= 0
-	evictSize 		:= int(sc.snap)
+	evictCounter := 0
+	evictSize := int(sc.snap)
 
 	for sc.main.Len() > 0 && evictSize > 0 {
 		front := sc.main.Front()
@@ -81,16 +70,20 @@ func (sc *SnapCache[K,V]) Evict() int {
 			break
 		}
 
-		e := front.Value.(*entry[K, V])
+		e, ok := front.Value.(*entry[K, V])
+		if !ok {
+			panic("incorrect type in list")
+		}
 		sc.main.Remove(front)
-        delete(sc.items, e.key)
+		delete(sc.items, e.key)
 
-        evictCounter++
-        evictSize--
+		evictCounter++
+		evictSize--
 	}
 
 	return evictCounter
-} 
+}
+
 
 func (sc *SnapCache[K, V]) Get(key K) (V, bool) {
     sc.mu.Lock()

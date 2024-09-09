@@ -50,7 +50,9 @@ func (sc *SnapCache[K, V]) Set(key K, value V) {
         e.value = value
         return
     }
-
+	if sc.Full {
+		sc.Evict()
+	}
 	e = &entry[K, V]{
 		key:     key,
 		value:   value,

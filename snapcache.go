@@ -1,4 +1,4 @@
-package snapcache
+package main
 
 import (
 	"container/list"
